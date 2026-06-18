@@ -30,6 +30,10 @@ import {
 
 const WAVE = [8, 14, 20, 11, 22, 9, 16, 24, 12, 18, 8, 15, 21, 10];
 
+// Etiqueta de versão (aparece no topo do app) — facilita saber qual deploy
+// está no ar durante os testes. Suba este número a cada versão nova.
+const APP_VERSION = "v002";
+
 function badge(tone: StatusTone): { bg: string; color: string } {
   const map: Record<StatusTone, { bg: string; color: string }> = {
     cold: { bg: "#E8F0FB", color: "#3D7FCC" },
@@ -964,6 +968,20 @@ export default function FechouApp() {
                       transform: "translateY(-3px)",
                     }}
                   />
+                  <span
+                    style={{
+                      fontSize: "10.5px",
+                      fontWeight: 700,
+                      color: "#A7A296",
+                      background: "#F1EEE6",
+                      padding: "2px 7px",
+                      borderRadius: "999px",
+                      letterSpacing: "0.02em",
+                      alignSelf: "center",
+                    }}
+                  >
+                    {APP_VERSION}
+                  </span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   {supaOn && !userEmail && (
