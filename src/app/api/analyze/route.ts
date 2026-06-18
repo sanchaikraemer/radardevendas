@@ -33,7 +33,7 @@ export async function POST(req: Request) {
 
   try {
     const client = new OpenAI({ apiKey: key });
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const model = process.env.OPENAI_MODEL || "gpt-4o";
     const completion = await client.chat.completions.create({
       model,
       temperature: 0.7,
