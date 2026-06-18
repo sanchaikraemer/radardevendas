@@ -11,6 +11,7 @@ import type {
   Tone,
 } from "@/lib/types";
 import { parseWhatsApp } from "@/lib/parseWhatsApp";
+import { unzipSync } from "fflate";
 import {
   buildSuggestions,
   callAnalyze,
@@ -37,6 +38,47 @@ function badge(tone: StatusTone): { bg: string; color: string } {
     new: { bg: "#ECECEF", color: "#6B6D77" },
   };
   return map[tone] || map.new;
+}
+
+const AUDIO_EXT_RE = /\.(opus|ogg|m4a|mp3|wav|aac|amr)$/i;
+
+function guessType(name: string): string {
+  const n = name.toLowerCase();
+  if (n.endsWith(".opus")) return "audio/opus";
+  if (n.endsWith(".ogg")) return "audio/ogg";
+  if (n.endsWith(".m4a")) return "audio/mp4";
+  if (n.endsWith(".mp3")) return "audio/mpeg";
+  if (n.endsWith(".wav")) return "audio/wav";
+  if (n.endsWith(".aac")) return "audio/aac";
+  if (n.endsWith(".txt")) return "text/plain";
+  return "application/octet-stream";
+}
+
+// Expande zips (export "com mídia" do WhatsApp) numa lista plana de arquivos.
+async function expandFiles(input: File[]): Promise<File[]> {
+  const out: File[] = [];
+  for (const f of input) {
+    const isZip =
+      /\.zip$/i.test(f.name) ||
+      f.type === "application/zip" ||
+      f.type === "application/x-zip-compressed";
+    if (isZip) {
+      try {
+        const buf = new Uint8Array(await f.arrayBuffer());
+        const entries = unzipSync(buf);
+        for (const path of Object.keys(entries)) {
+          if (path.endsWith("/")) continue; // pasta
+          const base = path.split("/").pop() || path;
+          out.push(new File([entries[path]], base, { type: guessType(base) }));
+        }
+      } catch {
+        // zip ilegível — ignora
+      }
+    } else {
+      out.push(f);
+    }
+  }
+  return out;
 }
 
 export default function FechouApp() {
@@ -191,23 +233,27 @@ export default function FechouApp() {
     setImportStep(0);
   };
 
-  // Upload dos arquivos da conversa: detecta o .txt e guarda as mídias (áudios/anexos).
-  const onPickFiles = (files: FileList | null) => {
-    if (!files || !files.length) return;
-    let txtFile: File | null = null;
-    Array.from(files).forEach((f) => {
+  // Recebe arquivos (do seletor OU compartilhados do WhatsApp): expande zip,
+  // acha o .txt da conversa e guarda os áudios. Foto/vídeo/pdf são ignorados.
+  const ingestFiles = async (files: File[]): Promise<string> => {
+    const flat = await expandFiles(files);
+    let txt = "";
+    for (const f of flat) {
       if (/\.txt$/i.test(f.name)) {
-        if (!txtFile) txtFile = f;
-      } else {
+        if (!txt) txt = await f.text();
+      } else if (AUDIO_EXT_RE.test(f.name) || (f.type || "").startsWith("audio/")) {
         mediaRef.current.set(f.name, f);
       }
-    });
-    setMediaCount(mediaRef.current.size);
-    if (txtFile) {
-      const reader = new FileReader();
-      reader.onload = () => setImportText(String(reader.result || ""));
-      reader.readAsText(txtFile);
+      // imagens/vídeos/pdf → ignorados de propósito
     }
+    setMediaCount(mediaRef.current.size);
+    if (txt) setImportText(txt);
+    return txt;
+  };
+
+  const onPickFiles = (files: FileList | null) => {
+    if (!files || !files.length) return;
+    void ingestFiles(Array.from(files));
   };
   const skipImport = () => {
     timersRef.current.forEach(clearTimeout);
@@ -219,11 +265,13 @@ export default function FechouApp() {
     setAnalysisOpen(true);
   };
 
-  const analyze = async () => {
+  const analyze = () => analyzeText(importText);
+
+  const analyzeText = async (text: string) => {
     setAiBusy(true);
     setAiError("");
     setImportStep(1);
-    const parsed = parseWhatsApp(importText, myName);
+    const parsed = parseWhatsApp(text, myName);
     if (!parsed.count) {
       setAiBusy(false);
       setAiError(
@@ -323,6 +371,58 @@ export default function FechouApp() {
     setAnalysisOpen(true);
     setInput("");
   };
+
+  // Recebimento via WhatsApp: o service worker guardou a conversa compartilhada
+  // e mandou pra "/?shared=1". Aqui a gente lê, monta a linha do tempo e analisa.
+  useEffect(() => {
+    if (typeof window === "undefined" || !("caches" in window)) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("shared") !== "1") return;
+    let alive = true;
+    (async () => {
+      const files: File[] = [];
+      let sharedText = "";
+      try {
+        const cache = await caches.open("fechou-share");
+        const idxRes = await cache.match("/__shared__/index.json");
+        if (idxRes) {
+          const idx = (await idxRes.json()) as {
+            files?: { key: string; name: string; type?: string }[];
+            text?: string;
+          };
+          sharedText = idx.text || "";
+          for (const meta of idx.files || []) {
+            const r = await cache.match(meta.key);
+            if (r) {
+              const blob = await r.blob();
+              files.push(
+                new File([blob], meta.name, { type: meta.type || blob.type }),
+              );
+            }
+          }
+        }
+        for (const k of await cache.keys()) await cache.delete(k);
+      } catch {
+        /* sem cache acessível — segue */
+      }
+      window.history.replaceState({}, "", "/");
+      if (!alive) return;
+      openImport();
+      const txt = await ingestFiles(files);
+      const finalText = txt || sharedText;
+      if (finalText.trim()) {
+        await analyzeText(finalText);
+      } else {
+        setAiError(
+          "Recebi o compartilhamento, mas não achei o texto da conversa. No WhatsApp, use Exportar conversa e envie pro Fechou.",
+        );
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const send = () => {
     const t = input.trim();
@@ -1271,7 +1371,7 @@ export default function FechouApp() {
                   <input
                     type="file"
                     multiple
-                    accept=".txt,.opus,.ogg,.m4a,.mp3,.wav,.jpg,.jpeg,.png,.pdf,audio/*,image/*"
+                    accept=".txt,.zip,.opus,.ogg,.m4a,.mp3,.wav,.aac,audio/*,application/zip"
                     onChange={(e) => onPickFiles(e.target.files)}
                     style={{ display: "none" }}
                   />

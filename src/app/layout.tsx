@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import InstallBanner from "@/components/InstallBanner";
 
 export const metadata: Metadata = {
   title: "Fechou — respostas que fecham",
@@ -40,7 +41,10 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <InstallBanner />
+      </body>
     </html>
   );
 }

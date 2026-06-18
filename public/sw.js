@@ -1,11 +1,14 @@
-// Service worker do Fechou — instalável + shell offline.
+// Service worker do Fechou — instalável + shell offline + Share Target.
 // Estratégia segura para Next.js:
+//   • POST /share → recebe a conversa do WhatsApp, guarda os arquivos e
+//                   redireciona pra /?shared=1 (o app lê e processa)
 //   • navegações  → network-first, com fallback para /offline.html
 //   • _next/static e /assets (imutáveis, com hash) → cache-first
 //   • API e o resto → passthrough (rede)
-const VERSION = "fechou-v1";
+const VERSION = "fechou-v2";
 const PRECACHE = `${VERSION}-precache`;
 const RUNTIME = `${VERSION}-runtime`;
+const SHARE_CACHE = "fechou-share"; // transitório: guarda o que veio do WhatsApp
 const PRECACHE_URLS = [
   "/offline.html",
   "/manifest.json",
@@ -29,7 +32,7 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((k) => !k.startsWith(VERSION))
+            .filter((k) => !k.startsWith(VERSION) && k !== SHARE_CACHE)
             .map((k) => caches.delete(k)),
         ),
       )
@@ -37,11 +40,60 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Recebe a conversa exportada do WhatsApp (texto + áudios) e a deixa no cache
+// pra o app consumir. Ignorar/filtrar mídia é responsabilidade do app.
+async function handleShareTarget(request) {
+  try {
+    const form = await request.formData();
+    const files = form
+      .getAll("files")
+      .filter((f) => f && typeof f === "object" && typeof f.size === "number" && f.size > 0);
+    const text = form.get("text");
+    const cache = await caches.open(SHARE_CACHE);
+    for (const k of await cache.keys()) await cache.delete(k);
+
+    const meta = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const key = `/__shared__/file-${i}`;
+      await cache.put(
+        new Request(key),
+        new Response(f, {
+          headers: { "content-type": f.type || "application/octet-stream" },
+        }),
+      );
+      meta.push({ key, name: f.name || `arquivo-${i}`, type: f.type || "" });
+    }
+    await cache.put(
+      new Request("/__shared__/index.json"),
+      new Response(
+        JSON.stringify({
+          files: meta,
+          text: typeof text === "string" ? text : "",
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+  } catch (e) {
+    // se algo falhar, segue pro app mesmo assim
+  }
+  return Response.redirect(
+    new URL("/?shared=1", self.location.origin).toString(),
+    303,
+  );
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-  if (req.method !== "GET") return;
-
   const url = new URL(req.url);
+
+  // Share Target do WhatsApp
+  if (req.method === "POST" && url.pathname === "/share") {
+    event.respondWith(handleShareTarget(req));
+    return;
+  }
+
+  if (req.method !== "GET") return;
   if (url.origin !== self.location.origin) return; // só mesma origem
 
   // Navegações → network-first, fallback offline
