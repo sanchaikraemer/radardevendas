@@ -24,6 +24,11 @@ const INTER = "'Inter', system-ui, sans-serif";
 type Screen = "home" | "processing" | "result";
 const AUDIO_EXT_RE = /\.(opus|ogg|m4a|mp3|wav|aac|amr)$/i;
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
 function guessType(name: string): string {
   const n = name.toLowerCase();
   if (n.endsWith(".opus")) return "audio/opus";
@@ -120,6 +125,9 @@ export default function RadarApp() {
   const [result, setResult]           = useState<RadarResult | null>(null);
   const [contactName, setContactName] = useState("");
   const [copied, setCopied]           = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [showInstall, setShowInstall]     = useState(false);
+  const [isIOS, setIsIOS]                 = useState(false);
 
   const mediaRef    = useRef<Map<string, File>>(new Map());
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -128,6 +136,33 @@ export default function RadarApp() {
     if (typeof navigator !== "undefined" && "serviceWorker" in navigator)
       navigator.serviceWorker.register("/sw.js").catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const isStandalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      ("standalone" in navigator && (navigator as { standalone?: boolean }).standalone === true);
+    if (isStandalone) return;
+
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) && !("MSStream" in window);
+    setIsIOS(ios);
+    if (ios) { setShowInstall(true); return; }
+
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+      setShowInstall(true);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === "accepted") setShowInstall(false);
+  };
 
   useEffect(() => {
     if (typeof window === "undefined" || !("caches" in window)) return;
@@ -387,6 +422,63 @@ export default function RadarApp() {
             )}
 
             <div style={{ flex: 1 }} />
+
+            {/* install banner */}
+            {showInstall && (
+              <div style={{
+                margin: "20px 20px 0",
+                background: C.card, border: `1px solid ${C.border}`,
+                borderRadius: "16px", padding: "16px",
+                display: "flex", alignItems: "center", gap: "14px",
+              }}>
+                <div style={{
+                  width: "40px", height: "40px", borderRadius: "12px",
+                  background: C.coralDim, border: `1px solid ${C.coralBorder}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <LogoSymbol size={24} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700, color: C.text }}>
+                    Instale o Radar no celular
+                  </div>
+                  {isIOS ? (
+                    <div style={{ fontSize: "12px", color: C.muted, marginTop: "3px", lineHeight: 1.5 }}>
+                      Toque em <strong style={{ color: C.text }}>Compartilhar</strong> → <strong style={{ color: C.text }}>Adicionar à tela de início</strong>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: "12px", color: C.muted, marginTop: "3px" }}>
+                      Acesso rápido e funciona offline
+                    </div>
+                  )}
+                </div>
+                {!isIOS && (
+                  <button
+                    onClick={handleInstall}
+                    style={{
+                      background: C.coral, border: "none", color: "#fff",
+                      fontWeight: 700, fontSize: "12px", fontFamily: INTER,
+                      padding: "8px 14px", borderRadius: "10px", cursor: "pointer",
+                      flexShrink: 0,
+                    }}
+                  >
+                    Instalar
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowInstall(false)}
+                  style={{
+                    background: "none", border: "none", color: C.muted,
+                    fontSize: "18px", cursor: "pointer", padding: "0 2px",
+                    lineHeight: 1, flexShrink: 0,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
             <div style={{ padding: "0 20px", marginTop: "24px", fontSize: "11px", color: C.border, textAlign: "center", lineHeight: 1.5 }}>
               Conversas processadas com OpenAI · nenhum dado é armazenado
             </div>
