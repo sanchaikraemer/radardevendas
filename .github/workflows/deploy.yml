@@ -9,6 +9,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Vercel production deploy
-        run: |
-          curl -X POST "https://api.vercel.com/v1/integrations/deploy/prj_ZYSAeoqDeWyxck6ERchgsUFgh6iC/ty3wZQHQmK"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push to Vercel production branch
+        run: git push origin HEAD:claude/dreamy-turing-td9y7q
