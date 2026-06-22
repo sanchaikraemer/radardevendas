@@ -208,8 +208,10 @@ export default function RadarApp() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstall, setShowInstall] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
 
   const mediaRef = useRef<Map<string, File>>(new Map());
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -286,12 +288,16 @@ export default function RadarApp() {
     if (outcome === "accepted") setShowInstall(false);
   };
 
-  const saveMyName = (name: string) => {
+  const saveMyName = (name: string, showFeedback = false) => {
     const clean = name.trim();
     setMyName(clean);
     if (typeof window !== "undefined") {
       if (clean) window.localStorage.setItem("radar:myName", clean);
       else window.localStorage.removeItem("radar:myName");
+    }
+    if (showFeedback && clean) {
+      setNameSaved(true);
+      window.setTimeout(() => setNameSaved(false), 1_800);
     }
   };
 
@@ -495,7 +501,7 @@ export default function RadarApp() {
             <div style={{ padding: "52px 24px 0" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <LogoRow size={26} />
-                <span style={{ fontSize: "11px", fontWeight: 700, color: C.muted, letterSpacing: "0.06em" }}>v004</span>
+                <span style={{ fontSize: "11px", fontWeight: 700, color: C.muted, letterSpacing: "0.06em" }}>v005</span>
               </div>
               <h1
                 style={{
@@ -555,58 +561,51 @@ export default function RadarApp() {
                 value={myName}
                 onChange={(event) => setMyName(event.target.value)}
                 onBlur={(event) => saveMyName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                    saveMyName(event.currentTarget.value, true);
+                    fileInputRef.current?.click();
+                  }
+                }}
                 placeholder="Ex.: Sanchai"
                 autoComplete="name"
                 style={inputStyle}
               />
-              <div style={{ color: C.muted, fontSize: "11px", marginTop: "6px", lineHeight: 1.4 }}>
-                Na primeira importação, o Radar confirma quem é você e salva essa escolha neste aparelho.
+              <div style={{ color: nameSaved ? "#4ADE80" : C.muted, fontSize: "11px", marginTop: "6px", lineHeight: 1.4, transition: "color .3s" }}>
+                {nameSaved ? "Nome salvo. Selecione o arquivo da conversa." : "Na primeira importação, o Radar confirma quem é você e salva essa escolha neste aparelho."}
               </div>
             </div>
 
             <div style={{ margin: "16px 20px 0" }}>
-              <div style={eyebrowStyle(C.muted)}>OU SELECIONE O ARQUIVO</div>
-              <label
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".txt,.zip,.opus,.ogg,.m4a,.mp3,.wav,.aac,.amr,audio/*,application/zip,text/plain"
+                onChange={(event) => void onPickFiles(event.target.files)}
+                style={{ display: "none" }}
+              />
+              <button
+                type="button"
+                onClick={() => { saveMyName(myName); fileInputRef.current?.click(); }}
                 style={{
+                  ...primaryButtonStyle,
                   display: "flex",
                   alignItems: "center",
-                  gap: "12px",
-                  background: C.card,
-                  border: `1px dashed ${C.border}`,
+                  justifyContent: "center",
+                  gap: "10px",
+                  fontSize: "15px",
+                  padding: "15px 0",
                   borderRadius: "14px",
-                  padding: "14px",
-                  cursor: "pointer",
                 }}
               >
-                <input
-                  type="file"
-                  multiple
-                  accept=".txt,.zip,.opus,.ogg,.m4a,.mp3,.wav,.aac,.amr,audio/*,application/zip,text/plain"
-                  onChange={(event) => void onPickFiles(event.target.files)}
-                  style={{ display: "none" }}
-                />
-                <div
-                  style={{
-                    width: "36px",
-                    height: "36px",
-                    borderRadius: "10px",
-                    background: C.coral,
-                    color: "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "20px",
-                    fontWeight: 700,
-                    flexShrink: 0,
-                  }}
-                >
-                  ↑
-                </div>
-                <div>
-                  <div style={{ color: C.text, fontSize: "14px", fontWeight: 600 }}>Selecionar ZIP ou TXT exportado</div>
-                  <div style={{ color: C.muted, fontSize: "12px", marginTop: "2px" }}>Áudios anexados também são transcritos</div>
-                </div>
-              </label>
+                <span style={{ fontSize: "20px", lineHeight: 1 }}>↑</span>
+                Selecionar conversa
+              </button>
+              <div style={{ color: C.muted, fontSize: "11px", marginTop: "8px", textAlign: "center", lineHeight: 1.4 }}>
+                ZIP ou TXT exportado do WhatsApp · áudios também são transcritos
+              </div>
             </div>
 
             {error && <Alert text={error} />}
